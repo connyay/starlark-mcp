@@ -62,6 +62,12 @@ jobs:
             rm Cargo.toml.bak 2>/dev/null || true
           fi
 
+      - name: Update Cargo.lock
+        shell: bash
+        run: |
+          # Update Cargo.lock to reflect any Cargo.toml changes
+          cargo update --workspace
+
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
