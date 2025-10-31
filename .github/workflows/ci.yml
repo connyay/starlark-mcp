@@ -1,0 +1,86 @@
+name: build and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.1.0)'
+        required: false
+        type: string
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform.os_name }} with rust ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.platform.os }}
+    env:
+      # Extract version from release tag (e.g., v0.1.0 -> 0.1.0) or use workflow input
+      VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version || 'dev' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os_name: Linux-aarch64
+            os: ubuntu-24.04
+            target: aarch64-unknown-linux-musl
+            bin: mcp-star-linux-arm64
+          - os_name: Linux-x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            bin: mcp-star-linux-amd64
+          - os_name: Windows-x86_64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            bin: mcp-star-amd64.exe
+          - os_name: macOS-x86_64
+            os: macos-15-large
+            target: x86_64-apple-darwin
+            bin: mcp-star-darwin-amd64
+          - os_name: macOS-aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+            bin: mcp-star-darwin-arm64
+        toolchain:
+          - stable
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Update Cargo.toml version
+        shell: bash
+        run: |
+          # Strip 'v' prefix if present (e.g., v0.1.0 -> 0.1.0)
+          CLEAN_VERSION="${VERSION#v}"
+          echo "Setting version to: $CLEAN_VERSION"
+
+          # Update version in Cargo.toml
+          if [ "$CLEAN_VERSION" != "dev" ]; then
+            sed -i.bak "s/^version = \".*\"/version = \"$CLEAN_VERSION\"/" Cargo.toml
+            rm Cargo.toml.bak 2>/dev/null || true
+          fi
+
+      - name: Build binary
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: "build"
+          target: ${{ matrix.platform.target }}
+          toolchain: ${{ matrix.toolchain }}
+          args: "--locked --release"
+          strip: true
+      - name: Rename binary (linux and macos)
+        run: mv target/${{ matrix.platform.target }}/release/mcp-star target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        if: matrix.platform.os_name != 'Windows-x86_64'
+      - name: Rename binary (windows)
+        run: mv target/${{ matrix.platform.target }}/release/mcp-star.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        if: matrix.platform.os_name == 'Windows-x86_64'
+      - name: Generate SHA-256
+        run: shasum -a 256 target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
+      - name: Release binary and SHA-256 checksum to GitHub
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
