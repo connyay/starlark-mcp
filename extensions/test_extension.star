@@ -17,15 +17,14 @@ def describe_extension():
                 name = "test_tool",
                 description = "A test tool that echoes back messages",
                 handler = test_handler,
-                inputSchema = {
-                    "type": "object",
-                    "properties": {
-                        "message": {
-                            "type": "string",
-                            "description": "The message to echo back",
-                        },
-                    },
-                },
+                parameters = [
+                    ToolParameter(
+                        name = "message",
+                        param_type = "string",
+                        required = False,
+                        description = "The message to echo back",
+                    ),
+                ],
             ),
         ],
     )
