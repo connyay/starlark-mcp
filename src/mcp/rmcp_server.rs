@@ -2,7 +2,7 @@ use anyhow::Result;
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, Content, Implementation, InitializeRequestParam,
     InitializeResult, ListToolsResult, PaginatedRequestParam, ProtocolVersion, ServerCapabilities,
-    Tool as RmcpTool,
+    Tool as RmcpTool, ToolsCapability,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler};
@@ -16,6 +16,7 @@ use crate::mcp::Tool;
 use crate::starlark::engine::ToolExecutor;
 
 /// Adapter that bridges rmcp's ServerHandler with our Starlark ToolExecutor
+#[derive(Clone)]
 pub struct StarlarkMcpHandler {
     tools: Arc<RwLock<Vec<Tool>>>,
     tool_executor: ToolExecutor,
@@ -35,7 +36,21 @@ impl StarlarkMcpHandler {
         tools.push(tool);
     }
 
-    /// Convert our custom Tool to rmcp's Tool format
+    pub async fn refresh_tools(&self) {
+        info!("Refreshing tools from extensions");
+        let mut tools = self.tools.write().await;
+        tools.clear();
+
+        let extensions = self.tool_executor.engine().get_all_extensions().await;
+        for extension in extensions {
+            for tool in extension.to_mcp_tools() {
+                info!("Re-registering tool: {}", tool.name);
+                tools.push(tool);
+            }
+        }
+        info!("Tool refresh complete. Total tools: {}", tools.len());
+    }
+
     fn convert_to_rmcp_tool(tool: &Tool) -> RmcpTool {
         let mut schema_map = Map::new();
         schema_map.insert(
@@ -84,7 +99,7 @@ impl ServerHandler for StarlarkMcpHandler {
             context.peer.set_peer_info(request.clone());
         }
 
-        // Negotiate protocol version: prefer client's if supported, fallback to latest
+        // Negotiate protocol version: client's version if supported, else latest
         let client_version = request.protocol_version.to_string();
         let protocol_version = match client_version.as_str() {
             "2025-06-18" => ProtocolVersion::V_2025_06_18,
@@ -104,7 +119,7 @@ impl ServerHandler for StarlarkMcpHandler {
         Ok(InitializeResult {
             protocol_version,
             capabilities: ServerCapabilities {
-                tools: Some(serde_json::from_value(json!({ "listChanged": false })).unwrap()),
+                tools: Some(serde_json::from_value(json!({ "listChanged": true })).unwrap()),
                 ..Default::default()
             },
             server_info: Implementation {
@@ -195,7 +210,9 @@ impl ServerHandler for StarlarkMcpHandler {
         InitializeResult {
             protocol_version: ProtocolVersion::LATEST,
             capabilities: ServerCapabilities {
-                tools: Some(serde_json::from_value(json!({ "listChanged": false })).unwrap()),
+                tools: Some(ToolsCapability {
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             server_info: Implementation {

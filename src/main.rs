@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .without_time()
         .init();
 
     info!("Starting Starlark MCP Server");
@@ -38,8 +39,6 @@ async fn main() -> Result<()> {
     loader.load_all(&engine).await?;
 
     let handler = starlark_mcp::StarlarkMcpHandler::new(tool_executor);
-
-    // Register all tools from loaded extensions
     let extensions = engine.get_all_extensions().await;
     for extension in extensions {
         info!(
@@ -52,6 +51,15 @@ async fn main() -> Result<()> {
             handler.register_tool(tool).await;
         }
     }
+
+    let handler_for_watcher = handler.clone();
+    loader.start_watching(engine.clone(), move || {
+        let handler = handler_for_watcher.clone();
+        tokio::spawn(async move {
+            info!("Extension changed, refreshing tools...");
+            handler.refresh_tools().await;
+        });
+    })?;
 
     info!("Server ready, starting main loop");
     starlark_mcp::run_rmcp_server(handler).await?;

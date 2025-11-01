@@ -42,32 +42,31 @@ impl StarlarkEngine {
         let ast = AstModule::parse(name, content.to_owned(), &Dialect::Standard)
             .map_err(|e| anyhow!("Parse error: {}", e))?;
 
-        let module = Module::new();
-        let mut eval = Evaluator::new(&module);
+        // Evaluator must be dropped before any .await to prevent non-Send errors
+        let (extension, frozen_module) = {
+            let module = Module::new();
+            let mut eval = Evaluator::new(&module);
 
-        let _result = eval
-            .eval_module(ast, &self.globals)
-            .map_err(|e| anyhow!("Eval error: {}", e))?;
+            let _result = eval
+                .eval_module(ast, &self.globals)
+                .map_err(|e| anyhow!("Eval error: {}", e))?;
+            let describe_fn = module
+                .get("describe_extension")
+                .ok_or_else(|| anyhow!("Extension must define describe_extension()"))?;
 
-        // Call describe_extension to get the extension metadata
-        let describe_fn = module
-            .get("describe_extension")
-            .ok_or_else(|| anyhow!("Extension must define describe_extension()"))?;
+            let extension_value = eval
+                .eval_function(describe_fn, &[], &[])
+                .map_err(|e| anyhow!("Function call error: {}", e))?;
 
-        let extension_value = eval
-            .eval_function(describe_fn, &[], &[])
-            .map_err(|e| anyhow!("Function call error: {}", e))?;
+            let extension = extract_extension_from_value(extension_value, module.heap())?;
 
-        // Extract extension data while we still have access to the heap
-        let extension = extract_extension_from_value(extension_value, module.heap())?;
+            drop(eval);
+            let frozen_module = module
+                .freeze()
+                .map_err(|e| anyhow!("Freeze error: {}", e))?;
 
-        // Drop the evaluator before freezing
-        drop(eval);
-
-        // Freeze the module for reuse
-        let frozen_module = module
-            .freeze()
-            .map_err(|e| anyhow!("Freeze error: {}", e))?;
+            (extension, frozen_module)
+        };
 
         let mut extensions = self.extensions.write().await;
         extensions.insert(
@@ -96,8 +95,15 @@ impl StarlarkEngine {
         let extensions = self.extensions.read().await;
         extensions.values().map(|e| e.extension.clone()).collect()
     }
+
+    pub async fn remove_extension(&self, name: &str) -> Option<StarlarkExtension> {
+        info!("Removing extension: {}", name);
+        let mut extensions = self.extensions.write().await;
+        extensions.remove(name).map(|e| e.extension)
+    }
 }
 
+#[derive(Clone)]
 pub struct ToolExecutor {
     engine: Arc<StarlarkEngine>,
 }
@@ -145,13 +151,10 @@ impl ToolExecutor {
             .get(&extension_name)
             .ok_or_else(|| anyhow!("Extension not found: {}", extension_name))?;
 
-        // Set the exec whitelist for this extension
         super::modules::set_exec_whitelist(loaded_ext.extension.allowed_exec.clone());
 
-        // Create a new module for execution with a borrowed heap
         let module = Module::new();
 
-        // Get the handler function from the frozen module
         // Extract just the function name (remove module prefix if present)
         let function_name = tool
             .handler_name
@@ -166,29 +169,19 @@ impl ToolExecutor {
 
         let mut eval = Evaluator::new(&module);
 
-        // Convert JSON arguments to Starlark dict
         let heap = module.heap();
         let params_dict = json_to_starlark_value(arguments, heap)?;
-
-        // Get the handler value from the frozen value
         let handler = handler_frozen.value();
-
-        // Call the handler
         let result_value = eval
             .eval_function(handler, &[params_dict], &[])
             .map_err(|e| {
-                // Clear the whitelist on error
                 super::modules::clear_exec_whitelist();
                 anyhow!("Handler execution error: {}", e)
             })?;
 
-        // Clear the exec whitelist after execution
         super::modules::clear_exec_whitelist();
 
-        // Convert result back to JSON
         let result_json = starlark_value_to_json(result_value, heap)?;
-
-        // Parse as ToolResult
         let tool_result: ToolResult = serde_json::from_value(result_json)?;
 
         Ok(tool_result)
@@ -259,7 +252,6 @@ fn starlark_value_to_json<'v>(
                     .unpack_str()
                     .ok_or_else(|| anyhow!("Dict keys must be strings, got: {}", key))?;
 
-                // Get the value for this key
                 let val = value
                     .at(key, heap)
                     .map_err(|e| anyhow!("Error getting dict value: {}", e))?;
@@ -268,8 +260,6 @@ fn starlark_value_to_json<'v>(
             }
             return Ok(serde_json::Value::Object(map));
         }
-
-        // Try iterating (works for lists)
         if let Ok(iter) = value.iterate(heap) {
             let mut arr = Vec::new();
             for item in iter {
