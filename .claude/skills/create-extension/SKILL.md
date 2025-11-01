@@ -1,11 +1,11 @@
 ---
 name: create-extension
-description: Creates a new Starlark MCP extension with tools, handlers, and proper structure. Use when the user wants to add a new extension to the mcp-star server.
+description: Creates a new Starlark MCP extension with tools, handlers, and proper structure. Use when the user wants to add a new extension to the starlark-mcp server.
 ---
 
 # Create Extension
 
-Creates a new Starlark-based MCP extension for the mcp-star server.
+Creates a new Starlark-based MCP extension for the starlark-mcp server.
 
 ## Instructions
 

@@ -1,6 +1,6 @@
 # Starlark Modules
 
-This document describes the built-in modules available to Starlark extensions in mcp-star.
+This document describes the built-in modules available to Starlark extensions in starlark-mcp.
 
 ## Core Modules
 

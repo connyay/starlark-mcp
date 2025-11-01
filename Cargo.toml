@@ -1,10 +1,10 @@
 [package]
-name = "mcp-star"
+name = "starlark-mcp"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "mcp-star"
+name = "starlark-mcp"
 path = "src/main.rs"
 
 [dependencies]

@@ -109,7 +109,7 @@ impl ServerHandler for StarlarkMcpHandler {
             },
             server_info: Implementation {
                 name: "starlark-mcp".to_string(),
-                version: env!("MCP_STAR_VERSION").to_string(),
+                version: env!("STARLARK_MCP_VERSION").to_string(),
                 title: None,
                 icons: None,
                 website_url: None,
@@ -200,7 +200,7 @@ impl ServerHandler for StarlarkMcpHandler {
             },
             server_info: Implementation {
                 name: "starlark-mcp".to_string(),
-                version: env!("MCP_STAR_VERSION").to_string(),
+                version: env!("STARLARK_MCP_VERSION").to_string(),
                 title: None,
                 icons: None,
                 website_url: None,

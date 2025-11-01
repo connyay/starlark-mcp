@@ -27,23 +27,23 @@ jobs:
           - os_name: Linux-aarch64
             os: ubuntu-24.04
             target: aarch64-unknown-linux-musl
-            bin: mcp-star-linux-arm64
+            bin: starlark-mcp-linux-arm64
           - os_name: Linux-x86_64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            bin: mcp-star-linux-amd64
+            bin: starlark-mcp-linux-amd64
           - os_name: Windows-x86_64
             os: windows-2025
             target: x86_64-pc-windows-msvc
-            bin: mcp-star-amd64.exe
+            bin: starlark-mcp-amd64.exe
           - os_name: macOS-x86_64
             os: macos-15-large
             target: x86_64-apple-darwin
-            bin: mcp-star-darwin-amd64
+            bin: starlark-mcp-darwin-amd64
           - os_name: macOS-aarch64
             os: macos-15
             target: aarch64-apple-darwin
-            bin: mcp-star-darwin-arm64
+            bin: starlark-mcp-darwin-arm64
         toolchain:
           - stable
     steps:
@@ -77,10 +77,10 @@ jobs:
           args: "--locked --release"
           strip: true
       - name: Rename binary (linux and macos)
-        run: mv target/${{ matrix.platform.target }}/release/mcp-star target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        run: mv target/${{ matrix.platform.target }}/release/starlark-mcp target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
         if: matrix.platform.os_name != 'Windows-x86_64'
       - name: Rename binary (windows)
-        run: mv target/${{ matrix.platform.target }}/release/mcp-star.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        run: mv target/${{ matrix.platform.target }}/release/starlark-mcp.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
         if: matrix.platform.os_name == 'Windows-x86_64'
       - name: Generate SHA-256
         run: shasum -a 256 target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256

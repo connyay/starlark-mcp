@@ -1193,30 +1193,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
-name = "mcp-star"
-version = "0.1.0"
-dependencies = [
- "allocative",
- "anyhow",
- "argh",
- "chrono",
- "derive_more",
- "lazy_static",
- "postgres",
- "regex",
- "reqwest",
- "rmcp",
- "rusqlite",
- "serde",
- "serde_json",
- "starlark",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2106,6 +2082,30 @@ dependencies = [
  "strsim 0.10.0",
  "textwrap",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "starlark-mcp"
+version = "0.1.0"
+dependencies = [
+ "allocative",
+ "anyhow",
+ "argh",
+ "chrono",
+ "derive_more",
+ "lazy_static",
+ "postgres",
+ "regex",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "starlark",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

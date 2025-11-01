@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use tracing::info;
 
-use mcp_star::ExtensionLoader;
+use starlark_mcp::ExtensionLoader;
 
 #[derive(FromArgs)]
 /// Starlark-based MCP server
@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
     let args: Args = argh::from_env();
 
     if args.version {
-        println!("mcp-star {}", env!("MCP_STAR_VERSION"));
+        println!("starlark-mcp {}", env!("STARLARK_MCP_VERSION"));
         return Ok(());
     }
 
@@ -31,13 +31,13 @@ async fn main() -> Result<()> {
 
     info!("Starting Starlark MCP Server");
 
-    let tool_executor = mcp_star::ToolExecutor::new();
+    let tool_executor = starlark_mcp::ToolExecutor::new();
     let engine = tool_executor.engine();
 
     let loader = ExtensionLoader::new(args.extensions_dir);
     loader.load_all(&engine).await?;
 
-    let handler = mcp_star::StarlarkMcpHandler::new(tool_executor);
+    let handler = starlark_mcp::StarlarkMcpHandler::new(tool_executor);
 
     // Register all tools from loaded extensions
     let extensions = engine.get_all_extensions().await;
@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     }
 
     info!("Server ready, starting main loop");
-    mcp_star::run_rmcp_server(handler).await?;
+    starlark_mcp::run_rmcp_server(handler).await?;
 
     Ok(())
 }
