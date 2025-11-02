@@ -14,6 +14,10 @@ struct Args {
     /// print version and exit
     #[argh(switch, short = 'v')]
     version: bool,
+
+    /// run tests instead of starting the server
+    #[argh(switch, short = 't')]
+    test: bool,
 }
 
 #[tokio::main]
@@ -30,13 +34,21 @@ async fn main() -> Result<()> {
         .without_time()
         .init();
 
+    if args.test {
+        info!("Running tests from {}", args.extensions_dir);
+        if let Err(e) = starlark_mcp::run_tests(&args.extensions_dir).await {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
     info!("Starting Starlark MCP Server");
 
     let tool_executor = starlark_mcp::ToolExecutor::new();
     let engine = tool_executor.engine();
 
     let loader = ExtensionLoader::new(args.extensions_dir);
-    loader.load_all(&engine).await?;
+    loader.load_all(&engine, false).await?;
 
     let handler = starlark_mcp::StarlarkMcpHandler::new(tool_executor);
     let extensions = engine.get_all_extensions().await;

@@ -39,7 +39,7 @@ pub fn build_globals() -> Globals {
 }
 
 // Time module
-mod time {
+pub(crate) mod time {
     use super::*;
 
     #[derive(Debug, Display, Allocative, ProvidesStaticType, NoSerialize)]
@@ -74,7 +74,7 @@ mod time {
 }
 
 // Environment module
-mod env {
+pub(crate) mod env {
     use super::*;
 
     #[derive(Debug, Display, Allocative, ProvidesStaticType, NoSerialize)]
@@ -109,7 +109,7 @@ mod env {
 }
 
 // Exec module
-mod exec {
+pub(crate) mod exec {
     use super::*;
     use std::cell::RefCell;
 

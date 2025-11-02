@@ -17,7 +17,7 @@ impl ExtensionLoader {
         Self { extensions_dir }
     }
 
-    pub async fn load_all(&self, engine: &StarlarkEngine) -> Result<()> {
+    pub async fn load_all(&self, engine: &StarlarkEngine, include_tests: bool) -> Result<()> {
         let dir_path = Path::new(&self.extensions_dir);
 
         if !dir_path.exists() {
@@ -36,6 +36,11 @@ impl ExtensionLoader {
             let path = entry.path();
 
             if path.extension().and_then(|s| s.to_str()) == Some("star") {
+                if !include_tests && Self::is_test_file(&path) {
+                    info!("Skipping test file: {}", path.display());
+                    continue;
+                }
+
                 let file_name = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -127,6 +132,11 @@ impl ExtensionLoader {
             EventKind::Create(_) | EventKind::Modify(_) => {
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("star") {
+                        if Self::is_test_file(&path) {
+                            info!("Skipping test file in hot reload: {}", path.display());
+                            continue;
+                        }
+
                         let file_name = path
                             .file_stem()
                             .and_then(|s| s.to_str())
@@ -154,6 +164,14 @@ impl ExtensionLoader {
             EventKind::Remove(_) => {
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("star") {
+                        if Self::is_test_file(&path) {
+                            info!(
+                                "Skipping test file removal in hot reload: {}",
+                                path.display()
+                            );
+                            continue;
+                        }
+
                         let file_name = path
                             .file_stem()
                             .and_then(|s| s.to_str())
@@ -172,5 +190,12 @@ impl ExtensionLoader {
         }
 
         Ok(())
+    }
+
+    fn is_test_file(path: &Path) -> bool {
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .map(|name| name.ends_with("_test.star"))
+            .unwrap_or(false)
     }
 }

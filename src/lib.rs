@@ -1,10 +1,12 @@
 pub mod extensions;
 pub mod mcp;
 pub mod starlark;
+pub mod testing;
 
 pub use extensions::ExtensionLoader;
 pub use mcp::rmcp_server::{run_server as run_rmcp_server, StarlarkMcpHandler};
 pub use starlark::{StarlarkEngine, ToolExecutor};
+pub use testing::run_tests;
 
 #[cfg(test)]
 mod tests {
@@ -59,7 +61,7 @@ def describe_extension():
         let engine = StarlarkEngine::new();
         let loader = ExtensionLoader::new(extensions_dir.to_str().unwrap().to_string());
 
-        let result = loader.load_all(&engine).await;
+        let result = loader.load_all(&engine, false).await;
         assert!(result.is_ok(), "Should load extensions from directory");
 
         let extensions = engine.get_all_extensions().await;
@@ -147,7 +149,7 @@ def describe_extension():
         let engine = StarlarkEngine::new();
         let loader = ExtensionLoader::new("./nonexistent_directory".to_string());
 
-        let result = loader.load_all(&engine).await;
+        let result = loader.load_all(&engine, false).await;
         assert!(result.is_ok(), "Should handle missing directory gracefully");
     }
 
