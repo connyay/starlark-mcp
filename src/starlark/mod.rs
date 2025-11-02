@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod http;
+pub mod math;
 pub mod mcp_types;
 pub mod modules;
 pub mod postgres;

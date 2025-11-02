@@ -13,6 +13,7 @@ use starlark::values::{
 use std::process::Command;
 
 use super::http;
+use super::math;
 use super::mcp_types::mcp_globals;
 use super::postgres;
 use super::sqlite;
@@ -27,6 +28,7 @@ pub fn build_globals() -> Globals {
         LibraryExtension::Debug,
     ])
     .with(mcp_globals)
+    .with(math::register)
     .with(time::register)
     .with(env::register)
     .with(exec::register)

@@ -17,6 +17,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 allocative = "0.3"
 derive_more = "0.99"
+either = "1.9"
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"], default-features = false }
 url = "2.5"
 lazy_static = "1.4"

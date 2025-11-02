@@ -2209,6 +2209,7 @@ dependencies = [
  "argh",
  "chrono",
  "derive_more",
+ "either",
  "lazy_static",
  "notify",
  "postgres",
