@@ -17,7 +17,7 @@ impl ExtensionLoader {
         Self { extensions_dir }
     }
 
-    pub async fn load_all(&self, engine: &StarlarkEngine) -> Result<()> {
+    pub async fn load_all(&self, engine: &StarlarkEngine, include_tests: bool) -> Result<()> {
         let dir_path = Path::new(&self.extensions_dir);
 
         if !dir_path.exists() {
@@ -36,6 +36,17 @@ impl ExtensionLoader {
             let path = entry.path();
 
             if path.extension().and_then(|s| s.to_str()) == Some("star") {
+                let file_name_full = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+
+                // Skip test files unless explicitly requested
+                if !include_tests && file_name_full.ends_with("_test.star") {
+                    info!("Skipping test file: {}", file_name_full);
+                    continue;
+                }
+
                 let file_name = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -127,6 +138,17 @@ impl ExtensionLoader {
             EventKind::Create(_) | EventKind::Modify(_) => {
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("star") {
+                        let file_name_full = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown");
+
+                        // Skip test files in hot reload
+                        if file_name_full.ends_with("_test.star") {
+                            info!("Skipping test file in hot reload: {}", file_name_full);
+                            continue;
+                        }
+
                         let file_name = path
                             .file_stem()
                             .and_then(|s| s.to_str())
@@ -154,6 +176,17 @@ impl ExtensionLoader {
             EventKind::Remove(_) => {
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("star") {
+                        let file_name_full = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown");
+
+                        // Skip test files in hot reload
+                        if file_name_full.ends_with("_test.star") {
+                            info!("Skipping test file removal in hot reload: {}", file_name_full);
+                            continue;
+                        }
+
                         let file_name = path
                             .file_stem()
                             .and_then(|s| s.to_str())
