@@ -234,6 +234,15 @@ fn starlark_value_to_json<'v>(
         Ok(serde_json::Value::Bool(b))
     } else if let Some(i) = value.unpack_i32() {
         Ok(serde_json::Value::Number(i.into()))
+    } else if value.get_type() == "float" {
+        // Handle float type - parse from string representation
+        let float_str = value.to_string();
+        let f: f64 = float_str
+            .parse()
+            .map_err(|e| anyhow!("Failed to parse float '{}': {}", float_str, e))?;
+        Ok(serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null))
     } else if let Some(s) = value.unpack_str() {
         Ok(serde_json::Value::String(s.to_string()))
     } else {
@@ -269,5 +278,166 @@ fn starlark_value_to_json<'v>(
         }
 
         Err(anyhow!("Unsupported Starlark type: {}", value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use starlark::environment::Module;
+
+    fn eval_to_json(code: &str) -> Result<serde_json::Value> {
+        let module = Module::new();
+        let globals = Globals::standard();
+        let mut eval = Evaluator::new(&module);
+
+        let ast = AstModule::parse("test", code.to_owned(), &Dialect::Standard)
+            .map_err(|e| anyhow!("Parse error: {}", e))?;
+
+        let value = eval
+            .eval_module(ast, &globals)
+            .map_err(|e| anyhow!("Eval error: {}", e))?;
+
+        starlark_value_to_json(value, module.heap())
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_none() {
+        let result = eval_to_json("None").unwrap();
+        assert_eq!(result, json!(null));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_bool_true() {
+        let result = eval_to_json("True").unwrap();
+        assert_eq!(result, json!(true));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_bool_false() {
+        let result = eval_to_json("False").unwrap();
+        assert_eq!(result, json!(false));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_integer() {
+        let result = eval_to_json("42").unwrap();
+        assert_eq!(result, json!(42));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_negative_integer() {
+        let result = eval_to_json("-123").unwrap();
+        assert_eq!(result, json!(-123));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_float() {
+        let result = eval_to_json("3.14").unwrap();
+        assert_eq!(result, json!(3.14));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_negative_float() {
+        let result = eval_to_json("-2.5").unwrap();
+        assert_eq!(result, json!(-2.5));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_float_from_division() {
+        let result = eval_to_json("10 / 4").unwrap();
+        assert_eq!(result, json!(2.5));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_string() {
+        let result = eval_to_json("\"hello world\"").unwrap();
+        assert_eq!(result, json!("hello world"));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_empty_string() {
+        let result = eval_to_json("\"\"").unwrap();
+        assert_eq!(result, json!(""));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_list() {
+        let result = eval_to_json("[1, 2, 3]").unwrap();
+        assert_eq!(result, json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_empty_list() {
+        let result = eval_to_json("[]").unwrap();
+        assert_eq!(result, json!([]));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_mixed_list() {
+        let result = eval_to_json("[1, \"two\", True, None]").unwrap();
+        assert_eq!(result, json!([1, "two", true, null]));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_dict() {
+        let result = eval_to_json("{\"a\": 1, \"b\": 2}").unwrap();
+        assert_eq!(result, json!({"a": 1, "b": 2}));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_empty_dict() {
+        let result = eval_to_json("{}").unwrap();
+        assert_eq!(result, json!({}));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_nested_dict() {
+        let result = eval_to_json("{\"outer\": {\"inner\": 42}}").unwrap();
+        assert_eq!(result, json!({"outer": {"inner": 42}}));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_dict_with_list() {
+        let result = eval_to_json("{\"items\": [1, 2, 3]}").unwrap();
+        assert_eq!(result, json!({"items": [1, 2, 3]}));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_list_with_dict() {
+        let result = eval_to_json("[{\"a\": 1}, {\"b\": 2}]").unwrap();
+        assert_eq!(result, json!([{"a": 1}, {"b": 2}]));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_complex_nested() {
+        let result = eval_to_json(
+            r#"{
+                "name": "test",
+                "count": 42,
+                "enabled": True,
+                "data": [1, 2.5, "three"],
+                "nested": {"x": 10, "y": 20}
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(result["name"], json!("test"));
+        assert_eq!(result["count"], json!(42));
+        assert_eq!(result["enabled"], json!(true));
+        assert_eq!(result["data"], json!([1, 2.5, "three"]));
+        assert_eq!(result["nested"], json!({"x": 10, "y": 20}));
+    }
+
+    #[test]
+    fn test_starlark_value_to_json_float_precision() {
+        // Test that float precision is maintained
+        let result = eval_to_json("15.8").unwrap();
+        assert_eq!(result, json!(15.8));
+
+        let result = eval_to_json("0.1 + 0.2").unwrap();
+        // Note: floating point arithmetic means this won't be exactly 0.3
+        assert!(result.as_f64().unwrap() > 0.29 && result.as_f64().unwrap() < 0.31);
     }
 }
