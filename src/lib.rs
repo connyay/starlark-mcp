@@ -4,7 +4,7 @@ pub mod starlark;
 pub mod testing;
 
 pub use extensions::ExtensionLoader;
-pub use mcp::rmcp_server::{run_server as run_rmcp_server, StarlarkMcpHandler};
+pub use mcp::rmcp_server::{StarlarkMcpHandler, run_server as run_rmcp_server};
 pub use starlark::{StarlarkEngine, ToolExecutor};
 pub use testing::run_tests;
 

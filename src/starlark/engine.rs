@@ -1,14 +1,14 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use starlark::environment::{FrozenModule, Globals, Module};
 use starlark::eval::Evaluator;
 use starlark::syntax::{AstModule, Dialect};
-use starlark::values::{dict::AllocDict, Value};
+use starlark::values::{Value, dict::AllocDict};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use super::mcp_types::{extract_extension_from_value, StarlarkExtension};
+use super::mcp_types::{StarlarkExtension, extract_extension_from_value};
 use super::modules::build_globals;
 use crate::mcp::ToolResult;
 

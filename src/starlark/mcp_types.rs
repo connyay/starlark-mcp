@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use starlark::environment::GlobalsBuilder;
 use starlark::starlark_module;
 use starlark::values::dict::AllocDict;
-use starlark::values::{none::NoneType, Heap, Value};
+use starlark::values::{Heap, Value, none::NoneType};
 
 use crate::mcp::{Tool, ToolInputSchema};
 
@@ -158,58 +158,57 @@ pub fn extract_extension_from_value<'v>(
 
         // Extract parameters if present
         let mut parameters = Vec::new();
-        if let Ok(params_value) = tool_value.at(heap.alloc("parameters"), heap) {
-            if !params_value.is_none() {
-                for param_value in params_value
-                    .iterate(heap)
-                    .map_err(|e| anyhow!("Parameters iterate error: {}", e))?
-                {
-                    let param_name = param_value
-                        .at(heap.alloc("name"), heap)
-                        .map_err(|e| anyhow!("Parameter 'name' error: {}", e))?
-                        .unpack_str()
-                        .ok_or_else(|| anyhow!("Parameter 'name' must be a string"))?
-                        .to_string();
+        if let Ok(params_value) = tool_value.at(heap.alloc("parameters"), heap)
+            && !params_value.is_none()
+        {
+            for param_value in params_value
+                .iterate(heap)
+                .map_err(|e| anyhow!("Parameters iterate error: {}", e))?
+            {
+                let param_name = param_value
+                    .at(heap.alloc("name"), heap)
+                    .map_err(|e| anyhow!("Parameter 'name' error: {}", e))?
+                    .unpack_str()
+                    .ok_or_else(|| anyhow!("Parameter 'name' must be a string"))?
+                    .to_string();
 
-                    let param_type = param_value
-                        .at(heap.alloc("type"), heap)
-                        .map_err(|e| anyhow!("Parameter 'type' error: {}", e))?
-                        .unpack_str()
-                        .ok_or_else(|| anyhow!("Parameter 'type' must be a string"))?
-                        .to_string();
+                let param_type = param_value
+                    .at(heap.alloc("type"), heap)
+                    .map_err(|e| anyhow!("Parameter 'type' error: {}", e))?
+                    .unpack_str()
+                    .ok_or_else(|| anyhow!("Parameter 'type' must be a string"))?
+                    .to_string();
 
-                    let required = param_value
-                        .at(heap.alloc("required"), heap)
-                        .map_err(|e| anyhow!("Parameter 'required' error: {}", e))?
-                        .unpack_bool()
-                        .ok_or_else(|| anyhow!("Parameter 'required' must be a boolean"))?;
+                let required = param_value
+                    .at(heap.alloc("required"), heap)
+                    .map_err(|e| anyhow!("Parameter 'required' error: {}", e))?
+                    .unpack_bool()
+                    .ok_or_else(|| anyhow!("Parameter 'required' must be a boolean"))?;
 
-                    let default =
-                        if let Ok(default_val) = param_value.at(heap.alloc("default"), heap) {
-                            if !default_val.is_none() {
-                                Some(default_val.to_str())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
+                let default = if let Ok(default_val) = param_value.at(heap.alloc("default"), heap) {
+                    if !default_val.is_none() {
+                        Some(default_val.to_str())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-                    let description = param_value
-                        .at(heap.alloc("description"), heap)
-                        .map_err(|e| anyhow!("Parameter 'description' error: {}", e))?
-                        .unpack_str()
-                        .unwrap_or("")
-                        .to_string();
+                let description = param_value
+                    .at(heap.alloc("description"), heap)
+                    .map_err(|e| anyhow!("Parameter 'description' error: {}", e))?
+                    .unpack_str()
+                    .unwrap_or("")
+                    .to_string();
 
-                    parameters.push(StarlarkToolParameter {
-                        name: param_name,
-                        param_type,
-                        required,
-                        default,
-                        description,
-                    });
-                }
+                parameters.push(StarlarkToolParameter {
+                    name: param_name,
+                    param_type,
+                    required,
+                    default,
+                    description,
+                });
             }
         }
 

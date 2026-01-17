@@ -8,7 +8,7 @@ use starlark::starlark_module;
 use starlark::starlark_simple_value;
 use starlark::values::starlark_value;
 use starlark::values::{
-    dict::Dict, none::NoneType, Heap, NoSerialize, ProvidesStaticType, StarlarkValue, Value,
+    Heap, NoSerialize, ProvidesStaticType, StarlarkValue, Value, dict::Dict, none::NoneType,
 };
 use std::process::Command;
 

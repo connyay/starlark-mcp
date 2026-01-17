@@ -1,5 +1,5 @@
 use allocative::Allocative;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::NaiveDateTime;
 use derive_more::Display;
 use postgres::types::Type;
@@ -11,7 +11,7 @@ use starlark::starlark_module;
 use starlark::starlark_simple_value;
 use starlark::values::starlark_value;
 use starlark::values::{
-    dict::Dict, none::NoneType, Heap, NoSerialize, ProvidesStaticType, StarlarkValue, Value,
+    Heap, NoSerialize, ProvidesStaticType, StarlarkValue, Value, dict::Dict, none::NoneType,
 };
 
 /// PostgreSQL module for database operations

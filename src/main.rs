@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     if args.test {
         info!("Running tests from {}", args.extensions_dir);
-        if let Err(e) = starlark_mcp::run_tests(&args.extensions_dir).await {
+        if let Err(_e) = starlark_mcp::run_tests(&args.extensions_dir).await {
             std::process::exit(1);
         }
         return Ok(());

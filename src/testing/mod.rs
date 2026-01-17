@@ -1,6 +1,6 @@
 mod testing;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use starlark::environment::{FrozenModule, Globals, GlobalsBuilder, LibraryExtension, Module};
 use starlark::eval::{Evaluator, FileLoader};
 use starlark::syntax::{AstModule, Dialect};
@@ -126,12 +126,11 @@ fn discover_test_files(extensions_dir: &str) -> Result<Vec<PathBuf>> {
             continue;
         }
 
-        if entry_path.is_file() {
-            if let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str()) {
-                if file_name.ends_with("_test.star") {
-                    test_files.push(entry_path);
-                }
-            }
+        if entry_path.is_file()
+            && let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str())
+            && file_name.ends_with("_test.star")
+        {
+            test_files.push(entry_path);
         }
     }
 
@@ -205,7 +204,7 @@ fn execute_test(module: &FrozenModule, test_name: &str, file_name: &str) -> Test
                 name: full_name,
                 passed: false,
                 error: Some(format!("Test function '{}' not found", test_name)),
-            }
+            };
         }
     };
 
@@ -251,42 +250,42 @@ fn load_extension_modules(extensions_dir: &str) -> Result<HashMap<String, Arc<Fr
             continue;
         }
 
-        if entry_path.is_file() {
-            if let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str()) {
-                // Load non-test .star files as modules
-                if file_name.ends_with(".star") && !file_name.ends_with("_test.star") {
-                    let module_name = file_name.trim_end_matches(".star");
-                    let content = std::fs::read_to_string(&entry_path)?;
+        if entry_path.is_file()
+            && let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str())
+        {
+            // Load non-test .star files as modules
+            if file_name.ends_with(".star") && !file_name.ends_with("_test.star") {
+                let module_name = file_name.trim_end_matches(".star");
+                let content = std::fs::read_to_string(&entry_path)?;
 
-                    match AstModule::parse(file_name, content, &Dialect::Extended) {
-                        Ok(ast) => {
-                            let module = Module::new();
+                match AstModule::parse(file_name, content, &Dialect::Extended) {
+                    Ok(ast) => {
+                        let module = Module::new();
 
-                            // Evaluate the module in a scope so eval is dropped before freeze
-                            let eval_result = {
-                                let mut eval = Evaluator::new(&module);
-                                eval.eval_module(ast, &globals)
-                            };
+                        // Evaluate the module in a scope so eval is dropped before freeze
+                        let eval_result = {
+                            let mut eval = Evaluator::new(&module);
+                            eval.eval_module(ast, &globals)
+                        };
 
-                            if let Err(e) = eval_result {
-                                error!("Failed to load module {}: {}", module_name, e);
-                                continue;
+                        if let Err(e) = eval_result {
+                            error!("Failed to load module {}: {}", module_name, e);
+                            continue;
+                        }
+
+                        // Freeze and store the module
+                        match module.freeze() {
+                            Ok(frozen) => {
+                                info!("Loaded module: {}", module_name);
+                                modules.insert(module_name.to_string(), Arc::new(frozen));
                             }
-
-                            // Freeze and store the module
-                            match module.freeze() {
-                                Ok(frozen) => {
-                                    info!("Loaded module: {}", module_name);
-                                    modules.insert(module_name.to_string(), Arc::new(frozen));
-                                }
-                                Err(e) => {
-                                    error!("Failed to freeze module {}: {}", module_name, e);
-                                }
+                            Err(e) => {
+                                error!("Failed to freeze module {}: {}", module_name, e);
                             }
                         }
-                        Err(e) => {
-                            error!("Failed to parse module {}: {}", module_name, e);
-                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to parse module {}: {}", module_name, e);
                     }
                 }
             }

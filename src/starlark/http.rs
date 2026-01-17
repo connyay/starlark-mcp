@@ -1,5 +1,5 @@
 use allocative::Allocative;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use derive_more::Display;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::CONTENT_TYPE;
@@ -10,10 +10,10 @@ use starlark::starlark_module;
 use starlark::starlark_simple_value;
 use starlark::values::starlark_value;
 use starlark::values::{
+    Heap, NoSerialize, ProvidesStaticType, StarlarkValue, Value, ValueLike,
     dict::{Dict, DictRef},
     none::NoneType,
     tuple::TupleRef,
-    Heap, NoSerialize, ProvidesStaticType, StarlarkValue, Value, ValueLike,
 };
 use std::collections::HashMap;
 use url::Url;
@@ -432,10 +432,10 @@ fn starlark_to_json<'v>(value: Value<'v>, heap: &'v Heap) -> Result<JsonValue> {
 
 fn extract_dict_item<'v>(item: Value<'v>, _heap: &'v Heap) -> Result<(String, Value<'v>)> {
     // For dict iteration, we get (key, value) tuples
-    if let Some(tuple) = TupleRef::from_value(item) {
-        if tuple.len() == 2 {
-            return Ok((tuple.content()[0].to_str(), tuple.content()[1]));
-        }
+    if let Some(tuple) = TupleRef::from_value(item)
+        && tuple.len() == 2
+    {
+        return Ok((tuple.content()[0].to_str(), tuple.content()[1]));
     }
 
     Err(anyhow!(

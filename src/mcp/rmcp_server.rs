@@ -6,7 +6,7 @@ use rmcp::model::{
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::borrow::Cow;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -230,8 +230,8 @@ impl ServerHandler for StarlarkMcpHandler {
 pub async fn run_server(handler: StarlarkMcpHandler) -> Result<()> {
     info!("Starting rmcp-based MCP server...");
 
-    use rmcp::transport::stdio;
     use rmcp::ServiceExt;
+    use rmcp::transport::stdio;
 
     let service = handler.serve(stdio()).await?;
 
