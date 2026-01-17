@@ -100,6 +100,7 @@ jobs:
       - name: Generate SHA-256
         run: shasum -a 256 target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
       - name: Release binary and SHA-256 checksum to GitHub
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: |
