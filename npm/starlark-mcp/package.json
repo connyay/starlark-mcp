@@ -1,0 +1,40 @@
+{
+  "name": "starlark-mcp",
+  "version": "0.1.0",
+  "description": "A Model Context Protocol (MCP) server that runs Starlark extensions",
+  "keywords": [
+    "mcp",
+    "starlark",
+    "model-context-protocol",
+    "ai",
+    "llm",
+    "extensions"
+  ],
+  "homepage": "https://github.com/anthropics/starlark-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anthropics/starlark-mcp.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "starlark-mcp": "lib/index.js"
+  },
+  "main": "lib/index.js",
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/starlark-mcp-linux-x64": "0.1.0",
+    "@anthropic-ai/starlark-mcp-linux-arm64": "0.1.0",
+    "@anthropic-ai/starlark-mcp-darwin-x64": "0.1.0",
+    "@anthropic-ai/starlark-mcp-darwin-arm64": "0.1.0",
+    "@anthropic-ai/starlark-mcp-windows-x64": "0.1.0"
+  }
+}

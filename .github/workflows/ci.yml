@@ -7,6 +7,11 @@ on:
         description: 'Version to build (e.g., 0.1.0)'
         required: false
         type: string
+      publish_npm:
+        description: 'Publish to npm'
+        required: false
+        type: boolean
+        default: false
   release:
     types: [created]
 
@@ -28,22 +33,32 @@ jobs:
             os: ubuntu-24.04
             target: aarch64-unknown-linux-musl
             bin: starlark-mcp-linux-arm64
+            npm_os: linux
+            npm_arch: arm64
           - os_name: Linux-x86_64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             bin: starlark-mcp-linux-amd64
+            npm_os: linux
+            npm_arch: x64
           - os_name: Windows-x86_64
             os: windows-2025
             target: x86_64-pc-windows-msvc
             bin: starlark-mcp-amd64.exe
+            npm_os: windows
+            npm_arch: x64
           - os_name: macOS-x86_64
             os: macos-15-large
             target: x86_64-apple-darwin
             bin: starlark-mcp-darwin-amd64
+            npm_os: darwin
+            npm_arch: x64
           - os_name: macOS-aarch64
             os: macos-15
             target: aarch64-apple-darwin
             bin: starlark-mcp-darwin-arm64
+            npm_os: darwin
+            npm_arch: arm64
         toolchain:
           - stable
     steps:
@@ -90,3 +105,119 @@ jobs:
           files: |
             target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
             target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
+
+      # Upload artifacts for npm publishing
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform.npm_os }}-${{ matrix.platform.npm_arch }}
+          path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+          retention-days: 1
+
+  publish-npm:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_npm)
+    env:
+      VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version || 'dev' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare and publish platform-specific packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          CLEAN_VERSION="${VERSION#v}"
+          echo "Publishing version: $CLEAN_VERSION"
+
+          cd npm
+
+          # Platform mappings: npm_os-npm_arch -> binary name
+          declare -A PLATFORMS=(
+            ["linux-x64"]="starlark-mcp-linux-amd64"
+            ["linux-arm64"]="starlark-mcp-linux-arm64"
+            ["darwin-x64"]="starlark-mcp-darwin-amd64"
+            ["darwin-arm64"]="starlark-mcp-darwin-arm64"
+            ["windows-x64"]="starlark-mcp-amd64.exe"
+          )
+
+          for platform in "${!PLATFORMS[@]}"; do
+            node_os="${platform%-*}"
+            node_arch="${platform#*-}"
+            binary_name="${PLATFORMS[$platform]}"
+            node_pkg="@anthropic-ai/starlark-mcp-${node_os}-${node_arch}"
+
+            echo "=== Building package: $node_pkg ==="
+
+            # Create package directory
+            pkg_dir="starlark-mcp-${node_os}-${node_arch}"
+            mkdir -p "${pkg_dir}/bin"
+
+            # Copy binary
+            if [ "$node_os" = "windows" ]; then
+              cp "../artifacts/binary-${node_os}-${node_arch}/${binary_name}" "${pkg_dir}/bin/starlark-mcp.exe"
+            else
+              cp "../artifacts/binary-${node_os}-${node_arch}/${binary_name}" "${pkg_dir}/bin/starlark-mcp"
+              chmod +x "${pkg_dir}/bin/starlark-mcp"
+            fi
+
+            # Set os value for package.json (win32 for Windows in Node.js)
+            if [ "$node_os" = "windows" ]; then
+              pkg_os="win32"
+            else
+              pkg_os="$node_os"
+            fi
+
+            # Generate package.json from template
+            export node_pkg
+            export node_version="$CLEAN_VERSION"
+            export node_os="$pkg_os"
+            export node_arch
+            envsubst < package.json.tmpl > "${pkg_dir}/package.json"
+
+            # Publish package
+            cd "${pkg_dir}"
+            echo "Publishing ${node_pkg}@${CLEAN_VERSION}..."
+            npm publish --access public || echo "Warning: Failed to publish $node_pkg (may already exist)"
+            cd ..
+          done
+
+      - name: Publish base package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          CLEAN_VERSION="${VERSION#v}"
+
+          cd npm/starlark-mcp
+
+          # Update version in package.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"$CLEAN_VERSION\"/" package.json
+
+          # Update optionalDependencies versions
+          sed -i "s/\"@anthropic-ai\/starlark-mcp-linux-x64\": \".*\"/\"@anthropic-ai\/starlark-mcp-linux-x64\": \"$CLEAN_VERSION\"/" package.json
+          sed -i "s/\"@anthropic-ai\/starlark-mcp-linux-arm64\": \".*\"/\"@anthropic-ai\/starlark-mcp-linux-arm64\": \"$CLEAN_VERSION\"/" package.json
+          sed -i "s/\"@anthropic-ai\/starlark-mcp-darwin-x64\": \".*\"/\"@anthropic-ai\/starlark-mcp-darwin-x64\": \"$CLEAN_VERSION\"/" package.json
+          sed -i "s/\"@anthropic-ai\/starlark-mcp-darwin-arm64\": \".*\"/\"@anthropic-ai\/starlark-mcp-darwin-arm64\": \"$CLEAN_VERSION\"/" package.json
+          sed -i "s/\"@anthropic-ai\/starlark-mcp-windows-x64\": \".*\"/\"@anthropic-ai\/starlark-mcp-windows-x64\": \"$CLEAN_VERSION\"/" package.json
+
+          # Install dependencies and build
+          npm install
+          npm run build
+
+          # Publish
+          echo "Publishing starlark-mcp@${CLEAN_VERSION}..."
+          npm publish --access public
