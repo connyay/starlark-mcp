@@ -69,6 +69,16 @@ See [docs/TESTING.md](./docs/TESTING.md) for testing guide.
 
 ### Installation
 
+#### npm (Recommended)
+
+```bash
+# Run directly with npx (no install needed)
+npx starlark-mcp
+
+# Or install globally
+npm install -g starlark-mcp
+```
+
 #### From Source
 
 ```bash
