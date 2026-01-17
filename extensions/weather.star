@@ -60,10 +60,31 @@ def get_forecast(params):
             "content": [{"type": "text", "text": "No forecast data available"}],
         }
 
+    # Build structured data
+    forecast_periods = []
+    for period in periods[:7]:
+        forecast_periods.append({
+            "name": period.get("name", "Unknown"),
+            "temperature": period.get("temperature"),
+            "temperatureUnit": period.get("temperatureUnit", "F"),
+            "windSpeed": period.get("windSpeed", ""),
+            "windDirection": period.get("windDirection", ""),
+            "shortForecast": period.get("shortForecast", ""),
+            "detailedForecast": period.get("detailedForecast", ""),
+            "isDaytime": period.get("isDaytime", True),
+        })
+
+    structured = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "periods": forecast_periods,
+    }
+
+    # Build human-readable text
     output = "Weather Forecast for {}, {}\n".format(latitude, longitude)
     output += "=" * 50 + "\n\n"
 
-    for period in periods[:7]:  # Limit to 7 periods (about 3-4 days of forecast)
+    for period in periods[:7]:
         output += "{}\n".format(period.get("name", "Unknown"))
         output += "-" * 30 + "\n"
         output += "Temperature: {}°{}\n".format(
@@ -83,6 +104,7 @@ def get_forecast(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 def get_alerts(params):
@@ -114,8 +136,32 @@ def get_alerts(params):
     if not features:
         return {
             "content": [{"type": "text", "text": "No active weather alerts for {}".format(state.upper())}],
+            "structuredContent": {"state": state.upper(), "alerts": []},
         }
 
+    # Build structured data
+    alerts_list = []
+    for feature in features:
+        properties = feature.get("properties", {})
+        alerts_list.append({
+            "event": properties.get("event", "Unknown Event"),
+            "severity": properties.get("severity", "Unknown"),
+            "urgency": properties.get("urgency", "Unknown"),
+            "certainty": properties.get("certainty", "Unknown"),
+            "areaDesc": properties.get("areaDesc", ""),
+            "onset": properties.get("onset", ""),
+            "expires": properties.get("expires", ""),
+            "headline": properties.get("headline", ""),
+            "description": properties.get("description", ""),
+        })
+
+    structured = {
+        "state": state.upper(),
+        "alertCount": len(features),
+        "alerts": alerts_list,
+    }
+
+    # Build human-readable text
     output = "Active Weather Alerts for {}\n".format(state.upper())
     output += "=" * 50 + "\n\n"
     output += "Found {} active alert(s)\n\n".format(len(features))
@@ -155,6 +201,7 @@ def get_alerts(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 def get_current_conditions(params):
@@ -222,30 +269,62 @@ def get_current_conditions(params):
 
     obs_properties = observation_data.get("properties", {})
 
+    # Extract values for structured data
+    temp = obs_properties.get("temperature", {})
+    temp_c = temp.get("value") if temp else None
+    temp_f = (temp_c * 9.0 / 5.0) + 32 if temp_c != None else None
+
+    wind_speed = obs_properties.get("windSpeed", {})
+    wind_dir = obs_properties.get("windDirection", {})
+    humidity = obs_properties.get("relativeHumidity", {})
+    pressure = obs_properties.get("barometricPressure", {})
+
+    # Build structured data
+    structured = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "station": station_id,
+        "timestamp": obs_properties.get("timestamp", ""),
+        "conditions": obs_properties.get("textDescription", ""),
+        "temperature": {
+            "celsius": temp_c,
+            "fahrenheit": math.round(temp_f, 1) if temp_f != None else None,
+        },
+        "windSpeed": {
+            "value": wind_speed.get("value") if wind_speed else None,
+            "unit": "km/h",
+        },
+        "windDirection": {
+            "degrees": wind_dir.get("value") if wind_dir else None,
+        },
+        "humidity": {
+            "value": humidity.get("value") if humidity else None,
+            "unit": "%",
+        },
+        "pressure": {
+            "value": pressure.get("value") if pressure else None,
+            "unit": "Pa",
+        },
+    }
+
+    # Build human-readable text
     output = "Current Weather Conditions\n"
     output += "Location: {}, {}\n".format(latitude, longitude)
     output += "Station: {}\n".format(station_id)
     output += "=" * 50 + "\n\n"
 
-    temp = obs_properties.get("temperature", {})
-    if temp and temp.get("value") != None:
-        temp_c = temp["value"]  # API returns Celsius
-        temp_f = (temp_c * 9.0 / 5.0) + 32
+    if temp_c != None:
         output += "Temperature: {}°F ({}°C)\n".format(math.round(temp_f, 1), math.round(temp_c, 1))
 
-    wind_speed = obs_properties.get("windSpeed", {})
-    wind_dir = obs_properties.get("windDirection", {})
     if wind_speed and wind_speed.get("value") != None:
         output += "Wind: {} km/h".format(math.round(wind_speed["value"], 1))
         if wind_dir and wind_dir.get("value") != None:
             output += " from {}°".format(wind_dir["value"])
         output += "\n"
 
-    humidity = obs_properties.get("relativeHumidity", {})
     if humidity and humidity.get("value") != None:
         output += "Humidity: {}%\n".format(int(humidity["value"]))
 
-    pressure = obs_properties.get("barometricPressure", {})
     if pressure and pressure.get("value") != None:
         output += "Pressure: {} Pa\n".format(int(pressure["value"]))
 
@@ -257,6 +336,7 @@ def get_current_conditions(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 # Helper functions

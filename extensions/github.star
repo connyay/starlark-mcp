@@ -55,6 +55,7 @@ def get_pr_review_comments(params):
     if not comments_json or comments_json == "[]":
         return {
             "content": [{"type": "text", "text": "No review comments found for PR #{}".format(pr_number)}],
+            "structuredContent": {"repo": repo, "prNumber": pr_number, "comments": []},
         }
 
     comments = json.decode(comments_json)
@@ -71,7 +72,29 @@ def get_pr_review_comments(params):
         filter_msg = " from user '{}'".format(user_filter) if user_filter else ""
         return {
             "content": [{"type": "text", "text": "No review comments found for PR #{}{}".format(pr_number, filter_msg)}],
+            "structuredContent": {"repo": repo, "prNumber": pr_number, "userFilter": user_filter, "comments": []},
         }
+
+    # Build structured data
+    structured_comments = []
+    for comment in comments:
+        structured_comments.append({
+            "id": comment.get("id"),
+            "author": comment.get("user", {}).get("login", "unknown"),
+            "path": comment.get("path", ""),
+            "line": comment.get("line"),
+            "body": comment.get("body", ""),
+            "createdAt": comment.get("created_at", ""),
+            "updatedAt": comment.get("updated_at", ""),
+        })
+
+    structured = {
+        "repo": repo,
+        "prNumber": pr_number,
+        "userFilter": user_filter if user_filter else None,
+        "commentCount": len(comments),
+        "comments": structured_comments,
+    }
 
     # Format the output
     output = "Review Comments for PR #{} in {}:\n".format(pr_number, repo)
@@ -96,6 +119,7 @@ def get_pr_review_comments(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 def list_pull_requests(params):
@@ -136,9 +160,29 @@ def list_pull_requests(params):
     if not prs_json or prs_json == "[]":
         return {
             "content": [{"type": "text", "text": "No pull requests found"}],
+            "structuredContent": {"repo": repo, "state": state, "pullRequests": []},
         }
 
     prs = json.decode(prs_json)
+
+    # Build structured data
+    structured_prs = []
+    for pr in prs:
+        structured_prs.append({
+            "number": pr.get("number"),
+            "title": pr.get("title", ""),
+            "author": pr.get("author", {}).get("login", "unknown"),
+            "state": pr.get("state", "unknown"),
+            "createdAt": pr.get("createdAt", ""),
+            "updatedAt": pr.get("updatedAt", ""),
+        })
+
+    structured = {
+        "repo": repo,
+        "state": state,
+        "count": len(prs),
+        "pullRequests": structured_prs,
+    }
 
     # Format the output
     output = "Pull Requests in {} ({})\n".format(repo, state)
@@ -157,6 +201,7 @@ def list_pull_requests(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 def get_pr_details(params):
@@ -194,6 +239,25 @@ def get_pr_details(params):
     # Parse JSON output
     pr = json.decode(result["output"].strip())
 
+    # Build structured data
+    structured = {
+        "repo": repo,
+        "number": pr.get("number"),
+        "title": pr.get("title", ""),
+        "body": pr.get("body", ""),
+        "author": pr.get("author", {}).get("login", "unknown"),
+        "state": pr.get("state", "unknown"),
+        "reviewDecision": pr.get("reviewDecision"),
+        "mergeable": pr.get("mergeable"),
+        "createdAt": pr.get("createdAt", ""),
+        "updatedAt": pr.get("updatedAt", ""),
+        "changes": {
+            "additions": pr.get("additions", 0),
+            "deletions": pr.get("deletions", 0),
+            "changedFiles": pr.get("changedFiles", 0),
+        },
+    }
+
     # Format the output
     output = "Pull Request #{} in {}\n".format(pr.get("number", "?"), repo)
     output += "=" * 60 + "\n\n"
@@ -219,6 +283,7 @@ def get_pr_details(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 def get_pr_reviews(params):
@@ -255,9 +320,28 @@ def get_pr_reviews(params):
     if not reviews_json or reviews_json == "[]":
         return {
             "content": [{"type": "text", "text": "No reviews found for PR #{}".format(pr_number)}],
+            "structuredContent": {"repo": repo, "prNumber": pr_number, "reviews": []},
         }
 
     reviews = json.decode(reviews_json)
+
+    # Build structured data
+    structured_reviews = []
+    for review in reviews:
+        structured_reviews.append({
+            "id": review.get("id"),
+            "reviewer": review.get("user", {}).get("login", "unknown"),
+            "state": review.get("state", "unknown"),
+            "body": review.get("body", ""),
+            "submittedAt": review.get("submitted_at", ""),
+        })
+
+    structured = {
+        "repo": repo,
+        "prNumber": pr_number,
+        "reviewCount": len(reviews),
+        "reviews": structured_reviews,
+    }
 
     # Format the output
     output = "Reviews for PR #{} in {}:\n".format(pr_number, repo)
@@ -289,6 +373,7 @@ def get_pr_reviews(params):
 
     return {
         "content": [{"type": "text", "text": output}],
+        "structuredContent": structured,
     }
 
 # Helper functions
