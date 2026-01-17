@@ -191,7 +191,7 @@ impl ServerHandler for StarlarkMcpHandler {
                     content,
                     is_error: result.is_error,
                     meta: None,
-                    structured_content: None,
+                    structured_content: result.structured_content,
                 })
             }
             Err(e) => {
