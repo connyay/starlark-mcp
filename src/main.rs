@@ -44,7 +44,8 @@ async fn main() -> Result<()> {
 
     info!("Starting Starlark MCP Server");
 
-    let tool_executor = starlark_mcp::ToolExecutor::new();
+    let tool_executor =
+        starlark_mcp::ToolExecutor::new().with_extensions_dir(args.extensions_dir.clone());
     let engine = tool_executor.engine();
 
     let loader = ExtensionLoader::new(args.extensions_dir);

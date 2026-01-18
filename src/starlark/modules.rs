@@ -12,14 +12,17 @@ use starlark::values::{
 };
 use std::process::Command;
 
+use super::data;
+use super::fuzzy;
 use super::http;
 use super::math;
 use super::mcp_types::mcp_globals;
 use super::postgres;
 use super::sqlite;
 
-// Re-export exec whitelist functions
 pub use exec::{clear_exec_whitelist, set_exec_whitelist};
+
+pub use data::{clear_extensions_dir, set_extensions_dir};
 
 pub fn build_globals() -> Globals {
     GlobalsBuilder::extended_by(&[
@@ -35,10 +38,11 @@ pub fn build_globals() -> Globals {
     .with(http::register)
     .with(postgres::register)
     .with(sqlite::register)
+    .with(data::register)
+    .with(fuzzy::register)
     .build()
 }
 
-// Time module
 pub(crate) mod time {
     use super::*;
 
@@ -73,7 +77,6 @@ pub(crate) mod time {
     }
 }
 
-// Environment module
 pub(crate) mod env {
     use super::*;
 
@@ -108,7 +111,6 @@ pub(crate) mod env {
     }
 }
 
-// Exec module
 pub(crate) mod exec {
     use super::*;
     use std::cell::RefCell;
@@ -162,7 +164,6 @@ pub(crate) mod exec {
             #[starlark(default = NoneType)] args: Value<'v>,
             heap: &'v Heap,
         ) -> anyhow::Result<Value<'v>> {
-            // Parse arguments if provided
             let arg_vec = if args.is_none() {
                 Vec::new()
             } else {
@@ -176,7 +177,6 @@ pub(crate) mod exec {
                 vec
             };
 
-            // Check whitelist - must be explicitly configured and contain the command
             let whitelist = get_exec_whitelist();
             if whitelist.is_empty() {
                 return Err(anyhow::anyhow!(
@@ -194,51 +194,33 @@ pub(crate) mod exec {
                 ));
             }
 
-            // Execute the command
             let output = Command::new(&command)
                 .args(&arg_vec)
                 .output()
                 .map_err(|e| anyhow::anyhow!("Failed to execute command '{}': {}", command, e))?;
 
-            // Build result dictionary using SmallMap
             let mut map = SmallMap::new();
+            let insert = |map: &mut SmallMap<Value<'v>, Value<'v>>, key: &str, value: Value<'v>| {
+                let key_value = heap.alloc_str(key).to_value();
+                map.insert_hashed(key_value.get_hashed().expect("Failed to hash key"), value);
+            };
 
-            // Add stdout
-            map.insert_hashed(
-                heap.alloc_str("stdout")
-                    .to_value()
-                    .get_hashed()
-                    .map_err(|e| anyhow::anyhow!("Failed to hash key: {}", e))?,
+            insert(
+                &mut map,
+                "stdout",
                 heap.alloc(String::from_utf8_lossy(&output.stdout).to_string()),
             );
-
-            // Add stderr
-            map.insert_hashed(
-                heap.alloc_str("stderr")
-                    .to_value()
-                    .get_hashed()
-                    .map_err(|e| anyhow::anyhow!("Failed to hash key: {}", e))?,
+            insert(
+                &mut map,
+                "stderr",
                 heap.alloc(String::from_utf8_lossy(&output.stderr).to_string()),
             );
-
-            // Add exit_code
-            let exit_code = output.status.code().unwrap_or(-1);
-            map.insert_hashed(
-                heap.alloc_str("exit_code")
-                    .to_value()
-                    .get_hashed()
-                    .map_err(|e| anyhow::anyhow!("Failed to hash key: {}", e))?,
-                heap.alloc(exit_code),
+            insert(
+                &mut map,
+                "exit_code",
+                heap.alloc(output.status.code().unwrap_or(-1)),
             );
-
-            // Add success
-            map.insert_hashed(
-                heap.alloc_str("success")
-                    .to_value()
-                    .get_hashed()
-                    .map_err(|e| anyhow::anyhow!("Failed to hash key: {}", e))?,
-                heap.alloc(output.status.success()),
-            );
+            insert(&mut map, "success", heap.alloc(output.status.success()));
 
             Ok(heap.alloc(Dict::new(map)))
         }

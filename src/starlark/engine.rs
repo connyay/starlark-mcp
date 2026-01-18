@@ -15,6 +15,7 @@ use crate::mcp::ToolResult;
 pub struct StarlarkEngine {
     globals: Globals,
     extensions: Arc<RwLock<HashMap<String, LoadedExtension>>>,
+    extensions_dir: Option<String>,
 }
 
 struct LoadedExtension {
@@ -33,7 +34,17 @@ impl StarlarkEngine {
         Self {
             globals: build_globals(),
             extensions: Arc::new(RwLock::new(HashMap::new())),
+            extensions_dir: None,
         }
+    }
+
+    pub fn with_extensions_dir(mut self, dir: String) -> Self {
+        self.extensions_dir = Some(dir);
+        self
+    }
+
+    pub fn extensions_dir(&self) -> Option<&String> {
+        self.extensions_dir.as_ref()
     }
 
     pub async fn load_extension(&self, name: &str, content: &str) -> Result<StarlarkExtension> {
@@ -42,14 +53,18 @@ impl StarlarkEngine {
         let ast = AstModule::parse(name, content.to_owned(), &Dialect::Standard)
             .map_err(|e| anyhow!("Parse error: {}", e))?;
 
-        // Evaluator must be dropped before any .await to prevent non-Send errors
-        let (extension, frozen_module) = {
+        if let Some(ref dir) = self.extensions_dir {
+            super::modules::set_extensions_dir(dir.clone());
+        }
+
+        // Use a closure to ensure cleanup happens on all exit paths
+        let result = (|| -> Result<(StarlarkExtension, FrozenModule)> {
             let module = Module::new();
             let mut eval = Evaluator::new(&module);
 
-            let _result = eval
-                .eval_module(ast, &self.globals)
+            eval.eval_module(ast, &self.globals)
                 .map_err(|e| anyhow!("Eval error: {}", e))?;
+
             let describe_fn = module
                 .get("describe_extension")
                 .ok_or_else(|| anyhow!("Extension must define describe_extension()"))?;
@@ -65,8 +80,11 @@ impl StarlarkEngine {
                 .freeze()
                 .map_err(|e| anyhow!("Freeze error: {}", e))?;
 
-            (extension, frozen_module)
-        };
+            Ok((extension, frozen_module))
+        })();
+
+        super::modules::clear_extensions_dir();
+        let (extension, frozen_module) = result?;
 
         let mut extensions = self.extensions.write().await;
         extensions.insert(
@@ -106,6 +124,7 @@ impl StarlarkEngine {
 #[derive(Clone)]
 pub struct ToolExecutor {
     engine: Arc<StarlarkEngine>,
+    extensions_dir: Option<String>,
 }
 
 impl Default for ToolExecutor {
@@ -118,6 +137,14 @@ impl ToolExecutor {
     pub fn new() -> Self {
         Self {
             engine: Arc::new(StarlarkEngine::new()),
+            extensions_dir: None,
+        }
+    }
+
+    pub fn with_extensions_dir(self, dir: String) -> Self {
+        Self {
+            engine: Arc::new(StarlarkEngine::new().with_extensions_dir(dir.clone())),
+            extensions_dir: Some(dir),
         }
     }
 
@@ -132,7 +159,6 @@ impl ToolExecutor {
     ) -> Result<ToolResult> {
         debug!("Executing tool: {}", tool_name);
 
-        // Find the extension and tool
         let extensions = self.engine.extensions.read().await;
 
         let (extension_name, tool) = extensions
@@ -153,9 +179,12 @@ impl ToolExecutor {
 
         super::modules::set_exec_whitelist(loaded_ext.extension.allowed_exec.clone());
 
+        if let Some(ref dir) = self.extensions_dir {
+            super::modules::set_extensions_dir(dir.clone());
+        }
+
         let module = Module::new();
 
-        // Extract just the function name (remove module prefix if present)
         let function_name = tool
             .handler_name
             .split('.')
@@ -176,10 +205,12 @@ impl ToolExecutor {
             .eval_function(handler, &[params_dict], &[])
             .map_err(|e| {
                 super::modules::clear_exec_whitelist();
+                super::modules::clear_extensions_dir();
                 anyhow!("Handler execution error: {}", e)
             })?;
 
         super::modules::clear_exec_whitelist();
+        super::modules::clear_extensions_dir();
 
         let result_json = starlark_value_to_json(result_value, heap)?;
         let tool_result: ToolResult = serde_json::from_value(result_json)?;
@@ -228,57 +259,58 @@ fn starlark_value_to_json<'v>(
     value: Value<'v>,
     heap: &'v starlark::values::Heap,
 ) -> Result<serde_json::Value> {
+    // Handle primitives first
     if value.is_none() {
-        Ok(serde_json::Value::Null)
-    } else if let Some(b) = value.unpack_bool() {
-        Ok(serde_json::Value::Bool(b))
-    } else if let Some(i) = value.unpack_i32() {
-        Ok(serde_json::Value::Number(i.into()))
-    } else if value.get_type() == "float" {
-        // Handle float type - parse from string representation
+        return Ok(serde_json::Value::Null);
+    }
+    if let Some(b) = value.unpack_bool() {
+        return Ok(serde_json::Value::Bool(b));
+    }
+    if let Some(i) = value.unpack_i32() {
+        return Ok(serde_json::Value::Number(i.into()));
+    }
+    if let Some(s) = value.unpack_str() {
+        return Ok(serde_json::Value::String(s.to_string()));
+    }
+
+    // Handle float type (Starlark doesn't expose a direct float accessor)
+    if value.get_type() == "float" {
         let float_str = value.to_string();
         let f: f64 = float_str
             .parse()
             .map_err(|e| anyhow!("Failed to parse float '{}': {}", float_str, e))?;
-        Ok(serde_json::Number::from_f64(f)
+        return Ok(serde_json::Number::from_f64(f)
             .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null))
-    } else if let Some(s) = value.unpack_str() {
-        Ok(serde_json::Value::String(s.to_string()))
-    } else {
-        // Check type to see if it's a dict
-        let type_name = value.get_type();
-        if type_name == "dict" {
-            // Try to iterate keys and get values
-            let mut map = serde_json::Map::new();
-
-            // Get all keys by iterating the dict
-            for key in value
-                .iterate(heap)
-                .map_err(|e| anyhow!("Dict iterate error: {}", e))?
-            {
-                let key_str = key
-                    .unpack_str()
-                    .ok_or_else(|| anyhow!("Dict keys must be strings, got: {}", key))?;
-
-                let val = value
-                    .at(key, heap)
-                    .map_err(|e| anyhow!("Error getting dict value: {}", e))?;
-
-                map.insert(key_str.to_string(), starlark_value_to_json(val, heap)?);
-            }
-            return Ok(serde_json::Value::Object(map));
-        }
-        if let Ok(iter) = value.iterate(heap) {
-            let mut arr = Vec::new();
-            for item in iter {
-                arr.push(starlark_value_to_json(item, heap)?);
-            }
-            return Ok(serde_json::Value::Array(arr));
-        }
-
-        Err(anyhow!("Unsupported Starlark type: {}", value))
+            .unwrap_or(serde_json::Value::Null));
     }
+
+    // Handle dict
+    if value.get_type() == "dict" {
+        let mut map = serde_json::Map::new();
+        for key in value
+            .iterate(heap)
+            .map_err(|e| anyhow!("Dict iterate error: {}", e))?
+        {
+            let key_str = key
+                .unpack_str()
+                .ok_or_else(|| anyhow!("Dict keys must be strings, got: {}", key))?;
+            let val = value
+                .at(key, heap)
+                .map_err(|e| anyhow!("Error getting dict value: {}", e))?;
+            map.insert(key_str.to_string(), starlark_value_to_json(val, heap)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+
+    // Handle list/iterable
+    if let Ok(iter) = value.iterate(heap) {
+        let arr: Result<Vec<_>> = iter
+            .map(|item| starlark_value_to_json(item, heap))
+            .collect();
+        return Ok(serde_json::Value::Array(arr?));
+    }
+
+    Err(anyhow!("Unsupported Starlark type: {}", value))
 }
 
 #[cfg(test)]

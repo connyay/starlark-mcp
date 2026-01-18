@@ -27,6 +27,8 @@ fn build_test_globals() -> Globals {
     .with(crate::starlark::http::register)
     .with(crate::starlark::postgres::register)
     .with(crate::starlark::sqlite::register)
+    .with(crate::starlark::data::register)
+    .with(crate::starlark::fuzzy::register)
     .build()
 }
 
@@ -111,28 +113,27 @@ fn discover_test_files(extensions_dir: &str) -> Result<Vec<PathBuf>> {
         return Ok(Vec::new());
     }
 
-    // Canonicalize the directory path to prevent path traversal issues
     let canonical_dir = std::fs::canonicalize(path)?;
-    let mut test_files = Vec::new();
 
-    for entry in std::fs::read_dir(&canonical_dir)? {
-        let entry = entry?;
-        let entry_path = entry.path();
+    let test_files = std::fs::read_dir(&canonical_dir)?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let entry_path = entry.path();
+            let canonical_entry = std::fs::canonicalize(&entry_path).ok()?;
 
-        // Verify that the entry is within the expected directory
-        let canonical_entry = std::fs::canonicalize(&entry_path)?;
-        if !canonical_entry.starts_with(&canonical_dir) {
-            debug!("Skipping entry outside directory: {:?}", canonical_entry);
-            continue;
-        }
+            if !canonical_entry.starts_with(&canonical_dir) {
+                debug!("Skipping entry outside directory: {:?}", canonical_entry);
+                return None;
+            }
 
-        if entry_path.is_file()
-            && let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str())
-            && file_name.ends_with("_test.star")
-        {
-            test_files.push(entry_path);
-        }
-    }
+            let file_name = entry_path.file_name()?.to_str()?;
+            if entry_path.is_file() && file_name.ends_with("_test.star") {
+                Some(entry_path)
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Ok(test_files)
 }
@@ -148,20 +149,17 @@ fn load_test_file(
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    // Parse the Starlark code
     let ast = AstModule::parse(file_name, content, &Dialect::Extended)
         .map_err(|e| anyhow!("Failed to parse {}: {}", file_name, e))?;
 
-    // Create module and evaluator with test-specific globals
     let globals = build_test_globals();
     let module = Module::new();
 
-    // Create loader for available modules
     let loader = ModuleLoader {
         modules: available_modules.clone(),
     };
 
-    // Evaluate the test file in a scope so eval is dropped before freeze
+    // Evaluator must be dropped before freeze() to satisfy borrow checker
     {
         let mut eval = Evaluator::new(&module);
         eval.set_loader(&loader);
@@ -169,7 +167,6 @@ fn load_test_file(
             .map_err(|e| anyhow!("Failed to evaluate {}: {}", file_name, e))?;
     }
 
-    // Freeze the module after eval is dropped
     module.freeze()
 }
 
@@ -179,8 +176,7 @@ fn discover_test_functions(module: &FrozenModule) -> Vec<String> {
 
     for name in module.names() {
         debug!("Found name in module: {:?}", name);
-        // Note: Starlark's module.names() returns strings that may include quotes
-        // in their debug representation. We trim quotes to get the actual identifier.
+        // Starlark's module.names() may include quotes in debug repr, so trim them
         let clean_name = name.trim_matches('"');
         if clean_name.starts_with("test_") {
             test_functions.push(clean_name.to_string());
@@ -191,12 +187,16 @@ fn discover_test_functions(module: &FrozenModule) -> Vec<String> {
 }
 
 /// Execute a single test function
-fn execute_test(module: &FrozenModule, test_name: &str, file_name: &str) -> TestResult {
+fn execute_test(
+    module: &FrozenModule,
+    test_name: &str,
+    file_name: &str,
+    extensions_dir: &str,
+) -> TestResult {
     let full_name = format!("{}::{}", file_name, test_name);
 
     debug!("Running test: {}", full_name);
 
-    // Get the test function
     let test_fn = match module.get(test_name) {
         Ok(frozen_ref) => frozen_ref,
         Err(_) => {
@@ -208,12 +208,12 @@ fn execute_test(module: &FrozenModule, test_name: &str, file_name: &str) -> Test
         }
     };
 
-    // Create a new module for test execution
+    crate::starlark::modules::set_extensions_dir(extensions_dir.to_string());
+
     let exec_module = Module::new();
     let mut eval = Evaluator::new(&exec_module);
 
-    // Try to call the test function
-    match eval.eval_function(test_fn.value(), &[], &[]) {
+    let result = match eval.eval_function(test_fn.value(), &[], &[]) {
         Ok(_) => TestResult {
             name: full_name,
             passed: true,
@@ -224,7 +224,11 @@ fn execute_test(module: &FrozenModule, test_name: &str, file_name: &str) -> Test
             passed: false,
             error: Some(format!("{}", e)),
         },
-    }
+    };
+
+    crate::starlark::modules::clear_extensions_dir();
+
+    result
 }
 
 /// Load all non-test extensions as modules that can be imported by tests
@@ -234,76 +238,84 @@ fn load_extension_modules(extensions_dir: &str) -> Result<HashMap<String, Arc<Fr
         return Ok(HashMap::new());
     }
 
-    // Canonicalize the directory path to prevent path traversal issues
     let canonical_dir = std::fs::canonicalize(path)?;
     let mut modules = HashMap::new();
     let globals = build_globals();
 
-    for entry in std::fs::read_dir(&canonical_dir)? {
-        let entry = entry?;
-        let entry_path = entry.path();
+    crate::starlark::modules::set_extensions_dir(canonical_dir.to_string_lossy().to_string());
 
-        // Verify that the entry is within the expected directory
-        let canonical_entry = std::fs::canonicalize(&entry_path)?;
-        if !canonical_entry.starts_with(&canonical_dir) {
-            debug!("Skipping entry outside directory: {:?}", canonical_entry);
-            continue;
-        }
+    let extension_files: Vec<_> = std::fs::read_dir(&canonical_dir)?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let entry_path = entry.path();
+            let canonical_entry = std::fs::canonicalize(&entry_path).ok()?;
 
-        if entry_path.is_file()
-            && let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str())
-        {
-            // Load non-test .star files as modules
-            if file_name.ends_with(".star") && !file_name.ends_with("_test.star") {
-                let module_name = file_name.trim_end_matches(".star");
-                let content = std::fs::read_to_string(&entry_path)?;
-
-                match AstModule::parse(file_name, content, &Dialect::Extended) {
-                    Ok(ast) => {
-                        let module = Module::new();
-
-                        // Evaluate the module in a scope so eval is dropped before freeze
-                        let eval_result = {
-                            let mut eval = Evaluator::new(&module);
-                            eval.eval_module(ast, &globals)
-                        };
-
-                        if let Err(e) = eval_result {
-                            error!("Failed to load module {}: {}", module_name, e);
-                            continue;
-                        }
-
-                        // Freeze and store the module
-                        match module.freeze() {
-                            Ok(frozen) => {
-                                info!("Loaded module: {}", module_name);
-                                modules.insert(module_name.to_string(), Arc::new(frozen));
-                            }
-                            Err(e) => {
-                                error!("Failed to freeze module {}: {}", module_name, e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to parse module {}: {}", module_name, e);
-                    }
-                }
+            if !canonical_entry.starts_with(&canonical_dir) {
+                debug!("Skipping entry outside directory: {:?}", canonical_entry);
+                return None;
             }
+
+            let file_name = entry_path.file_name()?.to_str()?.to_string();
+            if entry_path.is_file()
+                && file_name.ends_with(".star")
+                && !file_name.ends_with("_test.star")
+            {
+                Some((entry_path, file_name))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for (entry_path, file_name) in extension_files {
+        let module_name = file_name.trim_end_matches(".star");
+
+        if let Err(e) =
+            load_single_module(&entry_path, &file_name, module_name, &globals, &mut modules)
+        {
+            error!("Failed to load module {}: {}", module_name, e);
         }
     }
 
+    crate::starlark::modules::clear_extensions_dir();
+
     Ok(modules)
+}
+
+/// Load a single extension module
+fn load_single_module(
+    entry_path: &Path,
+    file_name: &str,
+    module_name: &str,
+    globals: &Globals,
+    modules: &mut HashMap<String, Arc<FrozenModule>>,
+) -> Result<()> {
+    let content = std::fs::read_to_string(entry_path)?;
+    let ast = AstModule::parse(file_name, content, &Dialect::Extended)
+        .map_err(|e| anyhow!("Parse error: {}", e))?;
+
+    let module = Module::new();
+    {
+        let mut eval = Evaluator::new(&module);
+        eval.eval_module(ast, globals)
+            .map_err(|e| anyhow!("Eval error: {}", e))?;
+    }
+
+    let frozen = module
+        .freeze()
+        .map_err(|e| anyhow!("Freeze error: {}", e))?;
+    info!("Loaded module: {}", module_name);
+    modules.insert(module_name.to_string(), Arc::new(frozen));
+    Ok(())
 }
 
 /// Run all tests in the given directory
 pub async fn run_tests(extensions_dir: &str) -> Result<()> {
     println!("Discovering tests in: {}", extensions_dir);
 
-    // Load extension modules first so they can be imported by tests
     let extension_modules = load_extension_modules(extensions_dir)?;
     info!("Loaded {} extension modules", extension_modules.len());
 
-    // Discover test files
     let test_files = discover_test_files(extensions_dir)?;
 
     if test_files.is_empty() {
@@ -315,7 +327,6 @@ pub async fn run_tests(extensions_dir: &str) -> Result<()> {
 
     let mut summary = TestSummary::new();
 
-    // Run tests from each file
     for test_path in test_files {
         let file_name = test_path
             .file_name()
@@ -324,7 +335,6 @@ pub async fn run_tests(extensions_dir: &str) -> Result<()> {
 
         println!("\nRunning tests from: {}", file_name);
 
-        // Load the test file
         let test_module = match load_test_file(&test_path, &extension_modules) {
             Ok(module) => module,
             Err(e) => {
@@ -338,7 +348,6 @@ pub async fn run_tests(extensions_dir: &str) -> Result<()> {
             }
         };
 
-        // Discover test functions
         let test_functions = discover_test_functions(&test_module);
 
         if test_functions.is_empty() {
@@ -348,9 +357,8 @@ pub async fn run_tests(extensions_dir: &str) -> Result<()> {
 
         println!("  Found {} test(s)", test_functions.len());
 
-        // Execute each test function
         for test_name in test_functions {
-            let result = execute_test(&test_module, &test_name, file_name);
+            let result = execute_test(&test_module, &test_name, file_name, extensions_dir);
             let status = if result.passed { "✓" } else { "✗" };
             println!("    {} {}", status, test_name);
             if let Some(error) = &result.error {
@@ -360,10 +368,8 @@ pub async fn run_tests(extensions_dir: &str) -> Result<()> {
         }
     }
 
-    // Print summary
     summary.print();
 
-    // Exit with error code if any tests failed
     if summary.failed > 0 {
         return Err(anyhow!(
             "Tests failed: {} of {} tests",
