@@ -2,7 +2,7 @@ use anyhow::Result;
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, Content, Implementation, InitializeRequestParam,
     InitializeResult, ListToolsResult, PaginatedRequestParam, ProtocolVersion, ServerCapabilities,
-    Tool as RmcpTool, ToolsCapability,
+    Tool as RmcpTool, ToolAnnotations as RmcpToolAnnotations, ToolsCapability,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler};
@@ -72,13 +72,31 @@ impl StarlarkMcpHandler {
             ),
         );
 
+        // Convert output_schema if present
+        let output_schema = tool.output_schema.as_ref().and_then(|schema| {
+            if let Value::Object(map) = schema {
+                Some(Arc::new(map.clone()))
+            } else {
+                None
+            }
+        });
+
+        // Convert annotations if present
+        let annotations = tool.annotations.as_ref().map(|a| RmcpToolAnnotations {
+            title: None, // Title is at tool level, not in annotations
+            read_only_hint: a.read_only_hint,
+            destructive_hint: a.destructive_hint,
+            idempotent_hint: a.idempotent_hint,
+            open_world_hint: a.open_world_hint,
+        });
+
         RmcpTool {
             name: Cow::Owned(tool.name.clone()),
-            title: None,
+            title: tool.title.clone(),
             description: Some(Cow::Owned(tool.description.clone())),
             input_schema: Arc::new(schema_map),
-            output_schema: None,
-            annotations: None,
+            output_schema,
+            annotations,
             icons: None,
         }
     }

@@ -4,7 +4,8 @@ use starlark::starlark_module;
 use starlark::values::dict::AllocDict;
 use starlark::values::{Heap, Value, none::NoneType};
 
-use crate::mcp::{Tool, ToolInputSchema};
+use crate::mcp::{Tool, ToolAnnotations, ToolInputSchema};
+use crate::starlark::engine::starlark_value_to_json;
 
 // Extension type - represents a loaded Starlark extension
 #[derive(Debug, Clone)]
@@ -19,9 +20,20 @@ pub struct StarlarkExtension {
 #[derive(Debug, Clone)]
 pub struct StarlarkTool {
     pub name: String,
+    pub title: Option<String>,
     pub description: String,
     pub handler_name: String,
     pub parameters: Vec<StarlarkToolParameter>,
+    pub annotations: Option<StarlarkToolAnnotations>,
+    pub output_schema: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StarlarkToolAnnotations {
+    pub destructive_hint: Option<bool>,
+    pub idempotent_hint: Option<bool>,
+    pub open_world_hint: Option<bool>,
+    pub read_only_hint: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +74,9 @@ pub fn mcp_globals(builder: &mut GlobalsBuilder) {
         description: String,
         #[starlark(default = NoneType)] parameters: Value<'v>,
         handler: Value<'v>,
+        #[starlark(default = NoneType)] title: Value<'v>,
+        #[starlark(default = NoneType)] annotations: Value<'v>,
+        #[starlark(default = NoneType)] output_schema: Value<'v>,
         heap: &'v Heap,
     ) -> anyhow::Result<Value<'v>> {
         // Create a dict to return using the allocator
@@ -70,6 +85,9 @@ pub fn mcp_globals(builder: &mut GlobalsBuilder) {
             (heap.alloc("description"), heap.alloc(description)),
             (heap.alloc("parameters"), parameters),
             (heap.alloc("handler"), handler),
+            (heap.alloc("title"), title),
+            (heap.alloc("annotations"), annotations),
+            (heap.alloc("output_schema"), output_schema),
         ];
 
         Ok(heap.alloc(AllocDict(dict_items)))
@@ -212,11 +230,77 @@ pub fn extract_extension_from_value<'v>(
             }
         }
 
+        // Extract optional title
+        let title = if let Ok(title_val) = tool_value.at(heap.alloc("title"), heap) {
+            if !title_val.is_none() {
+                Some(
+                    title_val
+                        .unpack_str()
+                        .ok_or_else(|| anyhow!("Tool 'title' must be a string"))?
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Extract optional annotations
+        let annotations =
+            if let Ok(annotations_val) = tool_value.at(heap.alloc("annotations"), heap) {
+                if !annotations_val.is_none() {
+                    let mut annot = StarlarkToolAnnotations::default();
+
+                    if let Ok(v) = annotations_val.at(heap.alloc("destructiveHint"), heap)
+                        && !v.is_none()
+                    {
+                        annot.destructive_hint = v.unpack_bool();
+                    }
+                    if let Ok(v) = annotations_val.at(heap.alloc("idempotentHint"), heap)
+                        && !v.is_none()
+                    {
+                        annot.idempotent_hint = v.unpack_bool();
+                    }
+                    if let Ok(v) = annotations_val.at(heap.alloc("openWorldHint"), heap)
+                        && !v.is_none()
+                    {
+                        annot.open_world_hint = v.unpack_bool();
+                    }
+                    if let Ok(v) = annotations_val.at(heap.alloc("readOnlyHint"), heap)
+                        && !v.is_none()
+                    {
+                        annot.read_only_hint = v.unpack_bool();
+                    }
+
+                    Some(annot)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+        // Extract optional output_schema
+        let output_schema = if let Ok(schema_val) = tool_value.at(heap.alloc("output_schema"), heap)
+        {
+            if !schema_val.is_none() {
+                Some(starlark_value_to_json(schema_val, heap)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         tools.push(StarlarkTool {
             name: tool_name,
+            title,
             description: tool_description,
             handler_name,
             parameters,
+            annotations,
+            output_schema,
         });
     }
 
@@ -302,14 +386,25 @@ impl StarlarkExtension {
                     }
                 }
 
+                // Convert annotations if present
+                let annotations = t.annotations.as_ref().map(|a| ToolAnnotations {
+                    destructive_hint: a.destructive_hint,
+                    idempotent_hint: a.idempotent_hint,
+                    open_world_hint: a.open_world_hint,
+                    read_only_hint: a.read_only_hint,
+                });
+
                 Tool {
                     name: t.name.clone(),
+                    title: t.title.clone(),
                     description: t.description.clone(),
                     input_schema: ToolInputSchema {
                         schema_type: "object".to_string(),
                         properties: properties.into_iter().collect(),
                         required,
                     },
+                    output_schema: t.output_schema.clone(),
+                    annotations,
                 }
             })
             .collect()

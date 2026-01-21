@@ -255,7 +255,7 @@ fn json_to_starlark_value<'v>(
     }
 }
 
-fn starlark_value_to_json<'v>(
+pub fn starlark_value_to_json<'v>(
     value: Value<'v>,
     heap: &'v starlark::values::Heap,
 ) -> Result<serde_json::Value> {
