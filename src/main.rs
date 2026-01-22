@@ -18,6 +18,14 @@ struct Args {
     /// run tests instead of starting the server
     #[argh(switch, short = 't')]
     test: bool,
+
+    /// run in HTTP mode instead of stdio
+    #[argh(switch)]
+    http: bool,
+
+    /// port for HTTP server (default: 3000)
+    #[argh(option, short = 'p', default = "3000")]
+    port: u16,
 }
 
 #[tokio::main]
@@ -75,7 +83,11 @@ async fn main() -> Result<()> {
     })?;
 
     info!("Server ready, starting main loop");
-    starlark_mcp::run_rmcp_server(handler).await?;
+    if args.http {
+        starlark_mcp::run_rmcp_server_http(handler, args.port).await?;
+    } else {
+        starlark_mcp::run_rmcp_server(handler).await?;
+    }
 
     Ok(())
 }

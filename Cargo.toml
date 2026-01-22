@@ -26,7 +26,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = "0.4"
 regex = "1.10"
 argh = "0.1"
-rmcp = { version = "0.8.3", features = ["transport-io"] }
+rmcp = { version = "0.8.3", features = ["transport-io", "transport-streamable-http-server"] }
+axum = "0.8"
 notify = "6.1"
 fuzzy-matcher = "0.3"
 

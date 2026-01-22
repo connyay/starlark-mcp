@@ -258,3 +258,32 @@ pub async fn run_server(handler: StarlarkMcpHandler) -> Result<()> {
 
     Ok(())
 }
+
+pub async fn run_server_http(handler: StarlarkMcpHandler, port: u16) -> Result<()> {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpService, session::local::LocalSessionManager,
+    };
+
+    info!("Starting MCP server (HTTP mode) on port {}...", port);
+
+    let handler_for_factory = handler.clone();
+    let service = StreamableHttpService::new(
+        move || Ok(handler_for_factory.clone()),
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+
+    let router = axum::Router::new().nest_service("/mcp", service);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+
+    info!("Server ready at http://0.0.0.0:{}/mcp", port);
+
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.unwrap();
+            info!("Shutting down...");
+        })
+        .await?;
+
+    Ok(())
+}
